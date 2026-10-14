@@ -5,7 +5,8 @@ use std::sync::OnceLock;
 use objc2::rc::Retained;
 use objc2::runtime::Sel;
 use objc2::{msg_send, msg_send_id, sel, ClassType};
-use objc2_app_kit::{NSBitmapImageRep, NSCursor, NSDeviceRGBColorSpace, NSImage};
+use objc2_app_kit::{NSBitmapImageRep, NSCursor, NSDeviceRGBColorSpace, NSEvent, NSImage, NSScreen};
+use objc2_foundation::MainThreadMarker;
 use objc2_foundation::{
     ns_string, NSData, NSDictionary, NSNumber, NSObject, NSObjectProtocol, NSPoint, NSSize,
     NSString,
@@ -50,14 +51,40 @@ pub(crate) fn cursor_from_image(cursor: &CursorImage) -> Retained<NSCursor> {
     let bitmap_data = unsafe { slice::from_raw_parts_mut(bitmap.bitmapData(), cursor.rgba.len()) };
     bitmap_data.copy_from_slice(&cursor.rgba);
 
+    let scale = pointer_screen_scale();
     let image = unsafe {
-        NSImage::initWithSize(NSImage::alloc(), NSSize::new(width.into(), height.into()))
+        NSImage::initWithSize(
+            NSImage::alloc(),
+            NSSize::new(f64::from(width) / scale, f64::from(height) / scale),
+        )
     };
     unsafe { image.addRepresentation(&bitmap) };
 
-    let hotspot = NSPoint::new(cursor.hotspot_x as f64, cursor.hotspot_y as f64);
+    let hotspot =
+        NSPoint::new(f64::from(cursor.hotspot_x) / scale, f64::from(cursor.hotspot_y) / scale);
 
     NSCursor::initWithImage_hotSpot(NSCursor::alloc(), &image, hotspot)
+}
+
+fn pointer_screen_scale() -> f64 {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return 1.0;
+    };
+    let at = unsafe { NSEvent::mouseLocation() };
+    let under = NSScreen::screens(mtm).into_iter().find(|screen| {
+        let f = screen.frame();
+        at.x >= f.origin.x
+            && at.x < f.origin.x + f.size.width
+            && at.y >= f.origin.y
+            && at.y < f.origin.y + f.size.height
+    });
+    let screen = under.or_else(|| NSScreen::mainScreen(mtm));
+    let scale = screen.map_or(1.0, |s| s.backingScaleFactor());
+    if scale.is_finite() && scale >= 1.0 {
+        scale
+    } else {
+        1.0
+    }
 }
 
 pub(crate) fn default_cursor() -> Retained<NSCursor> {
