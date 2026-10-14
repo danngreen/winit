@@ -38,6 +38,26 @@ fn macos_title_bar_drags_reach_the_app() {
     );
 }
 
+#[test]
+fn macos_custom_cursor_images_are_sized_in_points() {
+    // AppKit sizes a cursor image in points. winit gave the image its bitmap's size in pixels,
+    // so on a Retina display a bitmap drawn at the display's scale showed twice as big, and one
+    // drawn at 1x was upscaled and blurred (rust-windowing/winit#4094). The image and its hotspot
+    // are the bitmap's pixels over the backing scale of the screen under the pointer.
+    let cursor = source("macos/cursor.rs");
+    let from_image = section(&cursor, "pub(crate) fn cursor_from_image(", "\n}\n");
+    assert!(
+        from_image.contains("f64::from(width) / scale, f64::from(height) / scale"),
+        "the cursor image is sized in pixels"
+    );
+    assert!(
+        from_image.contains("f64::from(cursor.hotspot_x) / scale"),
+        "the hotspot is placed in pixels"
+    );
+    let scale = section(&cursor, "fn pointer_screen_scale(", "\n}\n");
+    assert!(scale.contains("backingScaleFactor()"), "the scale isn't the screen's backing scale");
+}
+
 // The scroll-phase policy is plain Rust over winit's own `TouchPhase`, so its tests run here.
 #[cfg(wayland_platform)]
 mod event {
